@@ -160,3 +160,5 @@ cython_debug/
 #.idea/
 
 dataset/
+/region_proposal_network.h5
+/classification_network.h5
