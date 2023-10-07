@@ -65,16 +65,13 @@ def add_anchor_points(image, points, point_size = 5):
         new_image[point[0] - point_size : point[0] + point_size, point[1] - point_size : point[1] + point_size, :] = [255, 255, 0]
     return new_image
 
-def generate_regions(anchor_points, region_ratios, region_scales):
+def generate_regions(image):
     # Going for each anchor point
     regions = []
-    for anchor in anchor_points:
-        for ratio in region_ratios:
-            for scale in region_scales:
-                value = 1 * scale
-                width = ratio[0] * value
-                height = ratio[1] * value
-                regions.append([anchor[0], anchor[1], width, height])
+    sss = cv2.ximgproc.segmentation.createSelectiveSearchSegmentation()
+    sss.setBaseImage(image)
+    sss.switchToSelectiveSearchQuality()
+    regions = sss.process()
     return regions
 
 def generate_non_overlapping_regions(image, region_ratios, region_scales):
@@ -178,10 +175,9 @@ def show_overlapping_area(region_mask, object_mask):
     combined_mask = main_mask + object_mask
     return combined_mask
 
-def propose_regions(image, object_coordinates, anchor_point_stride = 20, region_ratios = [[1, 1], [2, 1], [3, 1]], region_scales = [16, 24, 32, 40], iou_limit = 0.5):
+def propose_regions(image, object_coordinates, iou_limit = 0.5):
 
-    anchor_points = generate_anchor_points(image, anchor_point_stride)
-    regions = generate_regions(anchor_points, region_ratios, region_scales)
+    regions = generate_regions(image)
     region_targets = []
     for region in regions:
         if is_region_inside_image(image, region[0], region[1], region[2], region[3]):
@@ -206,20 +202,16 @@ def propose_regions(image, object_coordinates, anchor_point_stride = 20, region_
         return []
 
     fine_regions = np.array(fine_regions, dtype=np.int32)
-    # Deciding the non-fine regions to take
-    non_fine_regions_len = 150
-    if non_fine_regions_len > len(non_fine_regions):
-        non_fine_regions_len = len(non_fine_regions)
     # Taking non fine regions equal to that of fine regions
     # object_regions = np.array(object_regions, dtype=np.int32)
-    random_region_indices = np.random.choice(len(non_fine_regions), non_fine_regions_len)
+    random_region_indices = np.random.choice(len(non_fine_regions), len(fine_regions))
     non_fine_regions = np.array(non_fine_regions, dtype=np.int32)
     non_fine_regions = non_fine_regions[random_region_indices]
     region_targets = np.append(fine_regions, non_fine_regions, axis=0)
     region_targets = shuffle(region_targets)
     return region_targets
 
-def propose_train_regions(image, object_coordinates, anchor_point_stride = 20, region_ratios = [[1, 1], [2, 1], [3, 1]], region_scales = [16, 24, 32, 40], iou_limit = 0.5):
+def propose_train_regions(image, object_coordinates, iou_limit = 0.5):
     # anchor_points = generate_anchor_points(image, anchor_point_stride)
     # regions = generate_regions(anchor_points, region_ratios, region_scales)
     # region_targets = []
@@ -261,12 +253,12 @@ def resize_region(image, x, y, width, height, new_size = (64, 64)):
     cropped_image = cv2.resize(cropped_image, new_size)
     return cropped_image
 
-def detect_object_regions(image, rpn):
-    region_ratios = [[1, 1], [2, 1]]
-    region_scales = [64, 96, 128]
-    anchor_point_stride = 30
-    anchor_points = generate_anchor_points(image, anchor_point_stride)
-    regions = generate_regions(anchor_points, region_ratios, region_scales)
+def detect_object_regions(image, rpn, confidence_score=0.7):
+    # region_ratios = [[1, 1], [2, 1]]
+    # region_scales = [64, 96, 128]
+    # anchor_point_stride = 30
+    # anchor_points = generate_anchor_points(image, anchor_point_stride)
+    regions = generate_regions(image)
     final_regions = []
     region_images = []
     for region in regions:
@@ -274,17 +266,32 @@ def detect_object_regions(image, rpn):
             continue
 
         final_regions.append(region)
-        region_images.append(resize_region(image, region[0], region[1], region[2], region[3], (128, 128)))
+        region_images.append(resize_region(image, region[0], region[1], region[2], region[3], (96, 96)))
     
     final_regions = np.array(final_regions)
     region_images = np.array(region_images)
     region_proposals = rpn.predict(region_images)
-    region_cofidence = 0.7
+    region_cofidence = confidence_score
     region_proposals = np.reshape(region_proposals, (-1,))
     target_regions = final_regions[region_proposals > region_cofidence]
-    print(f'Proposed Regions: {len(target_regions)} out of {len(final_regions)}')
     target_region_images = region_images[region_proposals > region_cofidence]
-    return target_regions, target_region_images
+    proposed_regions = []
+    proposed_region_images = []
+    for i in range(len(target_regions)):
+        has_overlapping_region = False
+        for j in range(i + 1, len(target_regions)):
+            r1 = target_regions[i]
+            r2 = target_regions[j][:]
+            r2 = np.insert(r2, 0, 0)
+            iou = find_IOU(r2, r1)
+            if iou > 0.2:
+                has_overlapping_region = True
+                break
+        if not has_overlapping_region:
+            proposed_regions.append(r1)
+            proposed_region_images.append(target_region_images[i])
+    print(f'Proposed Regions: {len(proposed_regions)} out of {len(final_regions)}')
+    return proposed_regions, proposed_region_images
 
 def detect_objects(image, rpn, classifier, region_ratios, region_scales):
     anchor_point_stride = 15
