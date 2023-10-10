@@ -211,7 +211,7 @@ def propose_regions(image, object_coordinates, iou_limit = 0.5):
     region_targets = shuffle(region_targets)
     return region_targets
 
-def propose_train_regions(image, object_coordinates, iou_limit = 0.5):
+def propose_train_regions(object_coordinates):
     # anchor_points = generate_anchor_points(image, anchor_point_stride)
     # regions = generate_regions(anchor_points, region_ratios, region_scales)
     # region_targets = []
@@ -293,11 +293,8 @@ def detect_object_regions(image, rpn, confidence_score=0.7):
     print(f'Proposed Regions: {len(proposed_regions)} out of {len(final_regions)}')
     return proposed_regions, proposed_region_images
 
-def detect_objects(image, rpn, classifier, region_ratios, region_scales):
-    anchor_point_stride = 15
-    anchor_points = generate_anchor_points(image, anchor_point_stride)
-    regions = generate_regions(anchor_points, region_ratios, region_scales)
-    print(f'Anchor Points: {len(anchor_points)} - Regions: {len(regions)}')
+def detect_objects(image, rpn, classifier, region_cofidence = 0.7):
+    regions = generate_regions(image)
     final_regions = []
     region_images = []
     for region in regions:
@@ -305,12 +302,11 @@ def detect_objects(image, rpn, classifier, region_ratios, region_scales):
             continue
 
         final_regions.append(region)
-        region_images.append(resize_region(image, region[0], region[1], region[2], region[3], (128, 128)))
+        region_images.append(resize_region(image, region[0], region[1], region[2], region[3], (96, 96)))
     
     final_regions = np.array(final_regions)
     region_images = np.array(region_images)
     region_proposals = rpn.predict(region_images)
-    region_cofidence = 0.7
     region_proposals = np.reshape(region_proposals, (-1,))
     target_regions = final_regions[region_proposals > region_cofidence]
     print(f'Proposed Regions: {len(target_regions)} out of {len(final_regions)}')
